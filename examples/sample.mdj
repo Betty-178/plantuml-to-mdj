@@ -1,0 +1,173 @@
+{
+  "_type": "Project",
+  "_id": "project_96fab432be244d5dafb94d98",
+  "name": "PlantUML Converted Project",
+  "ownedElements": [
+    {
+      "_type": "UMLModel",
+      "_id": "model_28c9970153cd46219216ad78",
+      "_parent": {
+        "$ref": "project_96fab432be244d5dafb94d98"
+      },
+      "name": "Model",
+      "ownedElements": [
+        {
+          "_type": "UMLClass",
+          "_id": "User_b93f3f10cf8d40a89d12eaf9",
+          "_parent": {
+            "$ref": "model_28c9970153cd46219216ad78"
+          },
+          "name": "User",
+          "attributes": [
+            {
+              "_type": "UMLAttribute",
+              "_id": "attr_cbe7e5e2a8b34e57862c2dc9",
+              "_parent": {
+                "$ref": "User_b93f3f10cf8d40a89d12eaf9"
+              },
+              "name": "id",
+              "visibility": "private",
+              "type": "String"
+            }
+          ],
+          "operations": [
+            {
+              "_type": "UMLOperation",
+              "_id": "op_93950cc175da462fa8d5736f",
+              "_parent": {
+                "$ref": "User_b93f3f10cf8d40a89d12eaf9"
+              },
+              "name": "borrow",
+              "visibility": "public",
+              "parameters": [
+                {
+                  "_type": "UMLParameter",
+                  "_id": "param_c9967b0b7c6a4ea6b17b308a",
+                  "_parent": {
+                    "$ref": "op_93950cc175da462fa8d5736f"
+                  },
+                  "name": "isbn",
+                  "type": "String",
+                  "direction": "in"
+                },
+                {
+                  "_type": "UMLParameter",
+                  "_id": "param_a3443c396f084fc4917f0f24",
+                  "_parent": {
+                    "$ref": "op_93950cc175da462fa8d5736f"
+                  },
+                  "name": "",
+                  "type": "void",
+                  "direction": "return"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "_type": "UMLClass",
+          "_id": "Book_71da6b2416f144aea1430559",
+          "_parent": {
+            "$ref": "model_28c9970153cd46219216ad78"
+          },
+          "name": "Book",
+          "attributes": [
+            {
+              "_type": "UMLAttribute",
+              "_id": "attr_3e75f63bb7724ba6a8261ae8",
+              "_parent": {
+                "$ref": "Book_71da6b2416f144aea1430559"
+              },
+              "name": "isbn",
+              "visibility": "private",
+              "type": "String"
+            }
+          ],
+          "operations": []
+        },
+        {
+          "_type": "UMLDependency",
+          "_id": "dep_b4136c57cbeb4c3b90f662b8",
+          "_parent": {
+            "$ref": "model_28c9970153cd46219216ad78"
+          },
+          "name": "UserUsesBook",
+          "source": {
+            "$ref": "User_b93f3f10cf8d40a89d12eaf9"
+          },
+          "target": {
+            "$ref": "Book_71da6b2416f144aea1430559"
+          }
+        },
+        {
+          "_type": "UMLClassDiagram",
+          "_id": "diagram_a632c908edb54a98988ffcd3",
+          "_parent": {
+            "$ref": "model_28c9970153cd46219216ad78"
+          },
+          "name": "Main",
+          "ownedViews": [
+            {
+              "_type": "UMLClassView",
+              "_id": "view_6626eac1cef24172a1393c73",
+              "_parent": {
+                "$ref": "diagram_a632c908edb54a98988ffcd3"
+              },
+              "model": {
+                "$ref": "User_b93f3f10cf8d40a89d12eaf9"
+              },
+              "left": 60,
+              "top": 60,
+              "width": 283,
+              "height": 100,
+              "x": 60,
+              "y": 60,
+              "suppressAttributes": false,
+              "suppressOperations": false,
+              "showVisibility": true,
+              "showOperationSignature": true
+            },
+            {
+              "_type": "UMLClassView",
+              "_id": "view_ea5b9195803f4271878c4a1a",
+              "_parent": {
+                "$ref": "diagram_a632c908edb54a98988ffcd3"
+              },
+              "model": {
+                "$ref": "Book_71da6b2416f144aea1430559"
+              },
+              "left": 517,
+              "top": 65,
+              "width": 190,
+              "height": 90,
+              "x": 517,
+              "y": 65,
+              "suppressAttributes": false,
+              "suppressOperations": false,
+              "showVisibility": true,
+              "showOperationSignature": true
+            },
+            {
+              "_type": "UMLDependencyView",
+              "_id": "view_dab2f70bb4684278a40045de",
+              "_parent": {
+                "$ref": "diagram_a632c908edb54a98988ffcd3"
+              },
+              "model": {
+                "$ref": "dep_b4136c57cbeb4c3b90f662b8"
+              },
+              "tail": {
+                "$ref": "view_6626eac1cef24172a1393c73"
+              },
+              "head": {
+                "$ref": "view_ea5b9195803f4271878c4a1a"
+              },
+              "lineStyle": 1,
+              "points": "201:110;612:110"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
