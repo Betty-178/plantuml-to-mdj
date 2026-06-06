@@ -33,6 +33,11 @@ from typing import Dict, List, Tuple, Any, Optional
 CLASS_START_RE = re.compile(r"^\s*(class|interface|enum)\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{\s*$")
 VIS_MAP = {"+": "public", "-": "private", "#": "protected", "~": "package"}
 REL_RE = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s+([-.o*<|]+[-.>o*|]+)\s+([A-Za-z_][A-Za-z0-9_]*)\s*$")
+STATE_TRANS_RE = re.compile(
+    r"^\s*(\[\*\]|[A-Za-z_][A-Za-z0-9_]*)\s*[-.]+>\s*(\[\*\]|[A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*(.+?))?\s*$"
+)
+STATE_DECL_RE = re.compile(r"^\s*state\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*:\s*(.+?))?\s*$")
+PUML_BLOCK_RE = re.compile(r"@startuml(?:\s+([^\n\r]+))?(.*?)(?:@enduml|\Z)", re.IGNORECASE | re.DOTALL)
 
 
 def parse_member(line: str) -> Optional[Dict[str, Any]]:
@@ -43,6 +48,15 @@ def parse_member(line: str) -> Optional[Dict[str, Any]]:
     if s[0] in VIS_MAP:
         vis = VIS_MAP[s[0]]
         s = s[1:].strip()
+
+    # PlantUML may write modifiers before a member, e.g. "{static} main(...)".
+    # They are not essential for StarUML opening the file, but we strip them so
+    # the real operation / attribute name can still be parsed.
+    while s.startswith("{"):
+        end = s.find("}")
+        if end < 0:
+            break
+        s = s[end + 1:].strip()
 
     # operation: name(args): returnType
     if "(" in s and ")" in s:
@@ -309,8 +323,22 @@ def graphviz_layout(
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        check=True,
+        check=False,
     )
+    if proc.returncode != 0:
+        coords = {}
+        x = y = 60
+        row_h = 0
+        for i, n in enumerate(nodes):
+            w, h = sizes.get(n, (200, 100))
+            if i and i % 4 == 0:
+                x = 60
+                y += row_h + 100
+                row_h = 0
+            coords[n] = (x, y)
+            x += w + 120
+            row_h = max(row_h, h)
+        return coords
 
     centers: Dict[str, Tuple[float, float]] = {}
     for line in proc.stdout.splitlines():
@@ -512,6 +540,327 @@ def build_mdj(units: Dict[str, Dict[str, Any]], rels: List[Tuple[str, str, str]]
     return project
 
 
+
+
+# ------------------------- state diagram parsing / generation -------------------------
+
+def split_puml_blocks(text: str) -> List[Tuple[str, str]]:
+    """Return (name, body) blocks. If no @startuml exists, return the whole text."""
+    blocks = []
+    for m in PUML_BLOCK_RE.finditer(text):
+        name = (m.group(1) or "").strip()
+        body = m.group(2)
+        blocks.append((name, body))
+    return blocks or [("", text)]
+
+
+def is_state_block(name: str, body: str) -> bool:
+    lower_name = name.lower()
+    if "state" in lower_name:
+        return True
+    for raw in body.splitlines():
+        line = raw.strip()
+        if STATE_TRANS_RE.match(line) or STATE_DECL_RE.match(line):
+            return True
+    return False
+
+
+def is_class_block(name: str, body: str) -> bool:
+    lower_name = name.lower()
+    if "class" in lower_name:
+        return True
+    return bool(re.search(r"\b(class|interface|enum)\b", body))
+
+
+def parse_state_puml(text: str) -> Dict[str, Any]:
+    states: Dict[str, Dict[str, str]] = {}
+    transitions: List[Dict[str, str]] = []
+    has_initial = False
+    has_final = False
+
+    def ensure_state(alias: str) -> None:
+        if alias not in states:
+            states[alias] = {"alias": alias, "name": alias}
+
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("@") or line.startswith("'") or line.startswith("//") or line.startswith("skinparam"):
+            continue
+
+        dm = STATE_DECL_RE.match(line)
+        if dm:
+            alias = dm.group(1)
+            label = (dm.group(2) or "").strip()
+            states[alias] = {"alias": alias, "name": f"{alias}\n{label}" if label else alias}
+            continue
+
+        tm = STATE_TRANS_RE.match(line)
+        if tm:
+            src, dst, event = tm.group(1), tm.group(2), (tm.group(3) or "").strip()
+            if src == "[*]":
+                src = "__INITIAL__"
+                has_initial = True
+            else:
+                ensure_state(src)
+            if dst == "[*]":
+                dst = "__FINAL__"
+                has_final = True
+            else:
+                ensure_state(dst)
+            transitions.append({"source": src, "target": dst, "event": event})
+
+    return {
+        "states": [states[k] for k in sorted(states.keys())],
+        "transitions": transitions,
+        "has_initial": has_initial,
+        "has_final": has_final,
+    }
+
+
+def state_node_size(label: str) -> Tuple[int, int]:
+    parts = label.splitlines() or [label]
+    max_len = max(len(x) for x in parts)
+    return (max(80, min(240, 42 + 8 * max_len)), 54 if len(parts) > 1 else 44)
+
+
+def state_layout(state_data: Dict[str, Any]) -> Tuple[Dict[str, Tuple[int, int]], Dict[str, Tuple[int, int]]]:
+    """Return coords and sizes for state aliases, including __INITIAL__/__FINAL__."""
+    sizes: Dict[str, Tuple[int, int]] = {}
+    labels = {s["alias"]: s["name"] for s in state_data.get("states", [])}
+    for alias, label in labels.items():
+        sizes[alias] = state_node_size(label)
+    if state_data.get("has_initial"):
+        sizes["__INITIAL__"] = (20, 20)
+    if state_data.get("has_final"):
+        sizes["__FINAL__"] = (26, 26)
+
+    nodes = list(sizes.keys())
+    edges = [(t["source"], t["target"]) for t in state_data.get("transitions", [])]
+    if nodes:
+        try:
+            return graphviz_layout(nodes, edges, sizes, rankdir="LR"), sizes
+        except Exception:
+            pass
+
+    coords: Dict[str, Tuple[int, int]] = {}
+    for i, n in enumerate(nodes):
+        coords[n] = (80 + i * 190, 120)
+    return coords, sizes
+
+
+def make_state_view(label: str, model_id: str, diagram_id: str, gid: IdGen, x: int, y: int, w: int, h: int) -> Dict[str, Any]:
+    vid = gid("view")
+    name_comp = gid("view")
+    name_label = gid("view")
+    stereo_label = gid("view")
+    namespace_label = gid("view")
+    prop_label = gid("view")
+    ia_comp = gid("view")
+    it_comp = gid("view")
+    dec_comp = gid("view")
+    return {
+        "_type": "UMLStateView",
+        "_id": vid,
+        "_parent": ref(diagram_id),
+        "model": ref(model_id),
+        "subViews": [
+            {
+                "_type": "UMLNameCompartmentView",
+                "_id": name_comp,
+                "_parent": ref(vid),
+                "model": ref(model_id),
+                "subViews": [
+                    {"_type": "LabelView", "_id": stereo_label, "_parent": ref(name_comp), "model": ref(model_id), "visible": False, "font": "Arial;13;0", "parentStyle": True, "height": 13},
+                    {"_type": "LabelView", "_id": name_label, "_parent": ref(name_comp), "model": ref(model_id), "font": "Arial;13;1", "parentStyle": True, "left": x, "top": y + 5, "width": w, "height": 13, "text": label},
+                    {"_type": "LabelView", "_id": namespace_label, "_parent": ref(name_comp), "model": ref(model_id), "visible": False, "font": "Arial;13;0", "parentStyle": True, "height": 13},
+                    {"_type": "LabelView", "_id": prop_label, "_parent": ref(name_comp), "model": ref(model_id), "visible": False, "font": "Arial;13;0", "parentStyle": True, "height": 13},
+                ],
+                "font": "Arial;13;0",
+                "parentStyle": True,
+                "left": x,
+                "top": y,
+                "width": w,
+                "height": min(28, h),
+                "stereotypeLabel": ref(stereo_label),
+                "nameLabel": ref(name_label),
+                "namespaceLabel": ref(namespace_label),
+                "propertyLabel": ref(prop_label),
+            },
+            {"_type": "UMLInternalActivityCompartmentView", "_id": ia_comp, "_parent": ref(vid), "model": ref(model_id), "visible": False, "font": "Arial;13;0", "parentStyle": True, "width": 10, "height": 10},
+            {"_type": "UMLInternalTransitionCompartmentView", "_id": it_comp, "_parent": ref(vid), "model": ref(model_id), "visible": False, "font": "Arial;13;0", "parentStyle": True, "width": 10, "height": 10},
+            {"_type": "UMLDecompositionCompartmentView", "_id": dec_comp, "_parent": ref(vid), "model": ref(model_id), "font": "Arial;13;0", "parentStyle": True, "left": x, "top": y + min(28, h), "width": w},
+        ],
+        "font": "Arial;13;0",
+        "parentStyle": False,
+        "containerChangeable": True,
+        "left": x,
+        "top": y,
+        "width": w,
+        "height": h,
+        "nameCompartment": ref(name_comp),
+        "internalActivityCompartment": ref(ia_comp),
+        "internalTransitionCompartment": ref(it_comp),
+        "decompositionCompartment": ref(dec_comp),
+    }
+
+
+def add_state_machine_to_project(project: Dict[str, Any], state_data: Dict[str, Any], name: str = "StateMachine1") -> None:
+    gid = IdGen()
+    # Seed the generator with existing ids to avoid collisions across class + state parts.
+    def seed(o: Any) -> None:
+        if isinstance(o, dict):
+            if "_id" in o:
+                gid.used.add(o["_id"])
+            for v in o.values():
+                seed(v)
+        elif isinstance(o, list):
+            for x in o:
+                seed(x)
+    seed(project)
+
+    project_id = project["_id"]
+    sm_id = gid("statemachine")
+    region_id = gid("region")
+    diagram_id = gid("diagram")
+
+    state_machine = {
+        "_type": "UMLStateMachine",
+        "_id": sm_id,
+        "_parent": ref(project_id),
+        "name": name,
+        "ownedElements": [],
+        "regions": [],
+    }
+    diagram = {"_type": "UMLStatechartDiagram", "_id": diagram_id, "_parent": ref(sm_id), "name": "StatechartDiagram1", "ownedViews": []}
+    region = {"_type": "UMLRegion", "_id": region_id, "_parent": ref(sm_id), "vertices": [], "transitions": []}
+
+    coords, sizes = state_layout(state_data)
+    vertex_ids: Dict[str, str] = {}
+    view_ids: Dict[str, str] = {}
+
+    if state_data.get("has_initial"):
+        mid = gid("initial")
+        vertex_ids["__INITIAL__"] = mid
+        region["vertices"].append({"_type": "UMLPseudostate", "_id": mid, "_parent": ref(region_id), "kind": "initial"})
+    for st in state_data.get("states", []):
+        mid = gid("state")
+        vertex_ids[st["alias"]] = mid
+        region["vertices"].append({"_type": "UMLState", "_id": mid, "_parent": ref(region_id), "name": st["name"]})
+    if state_data.get("has_final"):
+        mid = gid("final")
+        vertex_ids["__FINAL__"] = mid
+        region["vertices"].append({"_type": "UMLFinalState", "_id": mid, "_parent": ref(region_id)})
+
+    # Node views
+    labels = {st["alias"]: st["name"] for st in state_data.get("states", [])}
+    for alias, mid in vertex_ids.items():
+        x, y = coords.get(alias, (80, 120))
+        w, h = sizes.get(alias, (80, 44))
+        if alias == "__INITIAL__":
+            vid = gid("view")
+            view_ids[alias] = vid
+            diagram["ownedViews"].append({
+                "_type": "UMLPseudostateView", "_id": vid, "_parent": ref(diagram_id), "model": ref(mid),
+                "font": "Arial;13;0", "parentStyle": False, "containerChangeable": True,
+                "left": x, "top": y, "width": w, "height": h,
+            })
+        elif alias == "__FINAL__":
+            vid = gid("view")
+            view_ids[alias] = vid
+            diagram["ownedViews"].append({
+                "_type": "UMLFinalStateView", "_id": vid, "_parent": ref(diagram_id), "model": ref(mid),
+                "font": "Arial;13;0", "parentStyle": False, "containerChangeable": True,
+                "left": x, "top": y, "width": w, "height": h,
+            })
+        else:
+            v = make_state_view(labels.get(alias, alias), mid, diagram_id, gid, x, y, w, h)
+            view_ids[alias] = v["_id"]
+            diagram["ownedViews"].append(v)
+
+    def center(alias: str) -> Tuple[int, int]:
+        x, y = coords.get(alias, (80, 120))
+        w, h = sizes.get(alias, (80, 44))
+        return x + w // 2, y + h // 2
+
+    # Transitions and edge views
+    for tr in state_data.get("transitions", []):
+        src, dst, event = tr["source"], tr["target"], tr.get("event", "")
+        if src not in vertex_ids or dst not in vertex_ids:
+            continue
+        tid = gid("trans")
+        tmodel = {"_type": "UMLTransition", "_id": tid, "_parent": ref(region_id), "source": ref(vertex_ids[src]), "target": ref(vertex_ids[dst])}
+        if event:
+            tmodel["triggers"] = [{"_type": "UMLEvent", "_id": gid("event"), "_parent": ref(tid), "name": event}]
+        region["transitions"].append(tmodel)
+
+        ax, ay = center(src)
+        bx, by = center(dst)
+        ev_id = gid("view")
+        name_label = gid("view")
+        stereo_label = gid("view")
+        prop_label = gid("view")
+        midx, midy = (ax + bx) // 2, (ay + by) // 2
+        edge_view = {
+            "_type": "UMLTransitionView", "_id": ev_id, "_parent": ref(diagram_id), "model": ref(tid),
+            "subViews": [
+                {"_type": "EdgeLabelView", "_id": name_label, "_parent": ref(ev_id), "model": ref(tid), "font": "Arial;13;0", "parentStyle": False, "left": midx, "top": midy - 18, "width": max(20, 7 * len(event)), "height": 13, "alpha": 1.5707963267948966, "distance": 15, "hostEdge": ref(ev_id), "edgePosition": 1, **({"text": event} if event else {"visible": False})},
+                {"_type": "EdgeLabelView", "_id": stereo_label, "_parent": ref(ev_id), "model": ref(tid), "visible": None, "font": "Arial;13;0", "parentStyle": False, "left": midx, "top": midy - 34, "height": 13, "alpha": 1.5707963267948966, "distance": 30, "hostEdge": ref(ev_id), "edgePosition": 1},
+                {"_type": "EdgeLabelView", "_id": prop_label, "_parent": ref(ev_id), "model": ref(tid), "visible": False, "font": "Arial;13;0", "parentStyle": False, "left": midx, "top": midy, "height": 13, "alpha": -1.5707963267948966, "distance": 15, "hostEdge": ref(ev_id), "edgePosition": 1},
+            ],
+            "font": "Arial;13;0", "parentStyle": False,
+            "head": ref(view_ids[dst]), "tail": ref(view_ids[src]), "lineStyle": 1,
+            "points": f"{ax}:{ay};{bx}:{by}", "showVisibility": True,
+            "nameLabel": ref(name_label), "stereotypeLabel": ref(stereo_label), "propertyLabel": ref(prop_label),
+        }
+        diagram["ownedViews"].append(edge_view)
+
+    state_machine["ownedElements"].append(diagram)
+    state_machine["regions"].append(region)
+    project.setdefault("ownedElements", []).append(state_machine)
+
+
+def build_state_mdj(state_data: Dict[str, Any]) -> Dict[str, Any]:
+    gid = IdGen()
+    project_id = gid("project")
+    project = {"_type": "Project", "_id": project_id, "name": "PlantUML Converted Project", "ownedElements": [], "documentVersion": 1}
+    add_state_machine_to_project(project, state_data)
+    return project
+
+
+def build_project_from_puml(text: str, keyword_strict: bool = False) -> Dict[str, Any]:
+    blocks = split_puml_blocks(text)
+    class_texts = []
+    state_texts: List[Tuple[str, str]] = []
+    for name, body in blocks:
+        if is_state_block(name, body) and not is_class_block(name, body):
+            state_texts.append((name, body))
+        elif is_class_block(name, body):
+            class_texts.append(body)
+        elif is_state_block(name, body):
+            state_texts.append((name, body))
+
+    if class_texts:
+        units, rels = parse_puml("\n".join(class_texts))
+        if keyword_strict:
+            apply_keyword_strict_patch(units)
+        project = build_mdj(units, rels)
+        project.setdefault("documentVersion", 1)
+    elif state_texts:
+        project = build_state_mdj(parse_state_puml(state_texts[0][1]))
+        state_texts = state_texts[1:]
+    else:
+        units, rels = parse_puml(text)
+        if keyword_strict:
+            apply_keyword_strict_patch(units)
+        project = build_mdj(units, rels)
+        project.setdefault("documentVersion", 1)
+
+    for idx, (name, body) in enumerate(state_texts, start=1):
+        sm_name = name.strip() or f"StateMachine{idx}"
+        add_state_machine_to_project(project, parse_state_puml(body), sm_name)
+    return project
+
+
 # ------------------------- validation -------------------------
 
 EXEMPT_EMPTY_NAME_TYPES = {
@@ -554,12 +903,8 @@ def main(argv: List[str]) -> int:
     inp = Path(argv[1])
     out = Path(argv[2])
     text = inp.read_text(encoding="utf-8")
-    units, rels = parse_puml(text)
+    mdj = build_project_from_puml(text, keyword_strict=("--keyword-strict" in argv))
 
-    if "--keyword-strict" in argv:
-        apply_keyword_strict_patch(units)
-
-    mdj = build_mdj(units, rels)
     dup, empty = validate_mdj(mdj)
     if dup or empty:
         print("VALIDATION FAILED", file=sys.stderr)
@@ -570,7 +915,7 @@ def main(argv: List[str]) -> int:
         return 2
     out.write_text(json.dumps(mdj, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"wrote {out}")
-    print(f"units={len(units)}, relations={len(rels)}")
+    print("ok")
     return 0
 
 

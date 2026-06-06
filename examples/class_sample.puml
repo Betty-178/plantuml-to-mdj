@@ -1,0 +1,17 @@
+@startuml
+
+class User {
+
+* id : String
+
+- borrow() : void
+  }
+
+class Book {
+
+* isbn : String
+  }
+
+User --> Book
+
+@enduml
