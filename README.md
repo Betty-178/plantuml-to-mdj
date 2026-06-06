@@ -1,37 +1,70 @@
 # plantuml-to-mdj
 
-A lightweight converter from PlantUML class diagrams to StarUML `.mdj` files.
+A lightweight converter from PlantUML UML diagrams to StarUML `.mdj` files.
 
-This tool parses PlantUML class/interface/enum definitions and relationships,
-then generates a StarUML-compatible `.mdj` project file with automatic layout.
+The project aims to provide a simple way to import PlantUML diagrams into StarUML without manually redrawing them.
+
+Currently supported:
+
+* UML Class Diagrams
+* UML State Diagrams (basic support)
+
+Future plans:
+
+* Activity Diagrams
+* Sequence Diagrams
+* Multiple diagrams in a single PlantUML file
+
+---
 
 ## Features
 
-- Convert PlantUML class diagrams to StarUML `.mdj`
-- Support classes, interfaces and enums
-- Support attributes and operations
-- Support enum literals
-- Support associations, dependencies, generalizations and realizations
-- Generate class diagram views automatically
-- Use Graphviz `dot` for automatic layout
-- Validate duplicate `_id` and risky empty names
+### Class Diagram Support
+
+* Classes
+* Interfaces
+* Enumerations
+* Attributes
+* Operations
+* Associations
+* Dependencies
+* Generalizations
+* Interface Realizations
+
+### State Diagram Support
+
+* States
+* Initial State (`[*]`)
+* Final State (`[*]`)
+* Transitions
+* Transition Events
+
+### General Features
+
+* Generate StarUML-compatible `.mdj`
+* Automatic diagram layout
+* Graphviz integration
+* Duplicate ID validation
+* Open directly in StarUML
+
+---
 
 ## Requirements
 
-- Python 3.8+
-- Graphviz
+* Python 3.8+
+* Graphviz
 
-Make sure Graphviz is installed and `dot` is available:
+Verify Graphviz installation:
 
 ```bash
 dot -V
 ```
 
-## Install Graphviz
+### Install Graphviz
 
 Windows:
 
-```
+```bash
 winget install graphviz
 ```
 
@@ -47,59 +80,112 @@ Ubuntu / Debian:
 sudo apt install graphviz
 ```
 
+---
+
 ## Usage
 
 ```bash
 python plantuml_to_mdj.py input.puml output.mdj
 ```
 
-Then open the generated `.mdj` file in StarUML.
+Open the generated file using StarUML.
 
-## Example
+---
 
-Create a file named `sample.puml`:
+## Example: Class Diagram
 
 ```plantuml
 @startuml
+
 class User {
-  - id: String
-  + borrow(isbn: String): void
+  - id : String
+  + borrow() : void
 }
 
 class Book {
-  - isbn: String
+  - isbn : String
 }
 
 User --> Book
+
 @enduml
 ```
 
-Run:
+Generate:
 
 ```bash
-python plantuml_to_mdj.py sample.puml sample.mdj
+python plantuml_to_mdj.py class_sample.puml class_sample.mdj
 ```
 
-Open `sample.mdj` in StarUML.
+---
 
-## Legacy option
+## Example: State Diagram
 
-This project also keeps a legacy keyword-strict mode for a specific OO homework checker:
+```plantuml
+@startuml
+
+[*] --> Idle
+
+Idle --> Running : start
+Running --> Paused : pause
+Paused --> Running : resume
+
+Running --> [*] : stop
+
+@enduml
+```
+
+Generate:
 
 ```bash
-python plantuml_to_mdj.py input.puml output.mdj --keyword-strict
+python plantuml_to_mdj.py state_sample.puml state_sample.mdj
 ```
 
-For general use, you do not need this option.
+---
 
-## Limitations
+## Project Structure
 
-* Only PlantUML class diagrams are supported.
-* Sequence diagrams, activity diagrams and state diagrams are not supported.
-* Some complex PlantUML syntax may not be parsed yet.
+```text
+plantuml-to-mdj/
+├── examples
+│   ├── class_sample.puml
+│   ├── class_sample.mdj
+│   ├── state_sample.puml
+│   └── state_sample.mdj
+├── LICENSE
+├── plantuml_to_mdj.py
+└── README.md
+```
+
+---
+
+## Current Limitations
+
+### Class Diagram
+
+* Some advanced PlantUML syntax may not be supported.
+
+### State Diagram
+
+* Composite states are not supported yet.
+* Nested regions are not supported yet.
+* Choice / Fork / Join nodes are not supported yet.
+* History states are not supported yet.
+
+---
+
+## Roadmap
+
+### v1.0
+
+* Class Diagram Support
+
+### v1.1
+
+* State Diagram Support
+
+---
 
 ## License
 
 MIT License
-
-

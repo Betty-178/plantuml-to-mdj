@@ -1,60 +1,50 @@
 {
   "_type": "Project",
-  "_id": "project_96fab432be244d5dafb94d98",
+  "_id": "project_799136405d86472aa6ad0ca0",
   "name": "PlantUML Converted Project",
   "ownedElements": [
     {
       "_type": "UMLModel",
-      "_id": "model_28c9970153cd46219216ad78",
+      "_id": "model_84a248b3f61144929b62d1b0",
       "_parent": {
-        "$ref": "project_96fab432be244d5dafb94d98"
+        "$ref": "project_799136405d86472aa6ad0ca0"
       },
       "name": "Model",
       "ownedElements": [
         {
           "_type": "UMLClass",
-          "_id": "User_b93f3f10cf8d40a89d12eaf9",
+          "_id": "User_e52da94775f445668dd68356",
           "_parent": {
-            "$ref": "model_28c9970153cd46219216ad78"
+            "$ref": "model_84a248b3f61144929b62d1b0"
           },
           "name": "User",
           "attributes": [
             {
               "_type": "UMLAttribute",
-              "_id": "attr_cbe7e5e2a8b34e57862c2dc9",
+              "_id": "attr_9b28fe60e0b045b4b9439ad7",
               "_parent": {
-                "$ref": "User_b93f3f10cf8d40a89d12eaf9"
+                "$ref": "User_e52da94775f445668dd68356"
               },
-              "name": "id",
-              "visibility": "private",
+              "name": "* id",
+              "visibility": "public",
               "type": "String"
             }
           ],
           "operations": [
             {
               "_type": "UMLOperation",
-              "_id": "op_93950cc175da462fa8d5736f",
+              "_id": "op_85977f8e92374bd3a72b3579",
               "_parent": {
-                "$ref": "User_b93f3f10cf8d40a89d12eaf9"
+                "$ref": "User_e52da94775f445668dd68356"
               },
               "name": "borrow",
-              "visibility": "public",
+              "visibility": "private",
               "parameters": [
                 {
                   "_type": "UMLParameter",
-                  "_id": "param_c9967b0b7c6a4ea6b17b308a",
+                  "_id": "param_51dde9635ccd400ca3f214f1",
                   "_parent": {
-                    "$ref": "op_93950cc175da462fa8d5736f"
-                  },
-                  "name": "isbn",
-                  "type": "String",
-                  "direction": "in"
-                },
-                {
-                  "_type": "UMLParameter",
-                  "_id": "param_a3443c396f084fc4917f0f24",
-                  "_parent": {
-                    "$ref": "op_93950cc175da462fa8d5736f"
+                    "$ref": "op_85977f8e92374bd3a72b3579"
                   },
                   "name": "",
                   "type": "void",
@@ -66,20 +56,20 @@
         },
         {
           "_type": "UMLClass",
-          "_id": "Book_71da6b2416f144aea1430559",
+          "_id": "Book_f80665dce23d452e9f764380",
           "_parent": {
-            "$ref": "model_28c9970153cd46219216ad78"
+            "$ref": "model_84a248b3f61144929b62d1b0"
           },
           "name": "Book",
           "attributes": [
             {
               "_type": "UMLAttribute",
-              "_id": "attr_3e75f63bb7724ba6a8261ae8",
+              "_id": "attr_bd6871575eea42bbbe0aa1e2",
               "_parent": {
-                "$ref": "Book_71da6b2416f144aea1430559"
+                "$ref": "Book_f80665dce23d452e9f764380"
               },
-              "name": "isbn",
-              "visibility": "private",
+              "name": "* isbn",
+              "visibility": "public",
               "type": "String"
             }
           ],
@@ -87,34 +77,34 @@
         },
         {
           "_type": "UMLDependency",
-          "_id": "dep_b4136c57cbeb4c3b90f662b8",
+          "_id": "dep_d16d9cd7939548508dccdf5b",
           "_parent": {
-            "$ref": "model_28c9970153cd46219216ad78"
+            "$ref": "model_84a248b3f61144929b62d1b0"
           },
           "name": "UserUsesBook",
           "source": {
-            "$ref": "User_b93f3f10cf8d40a89d12eaf9"
+            "$ref": "User_e52da94775f445668dd68356"
           },
           "target": {
-            "$ref": "Book_71da6b2416f144aea1430559"
+            "$ref": "Book_f80665dce23d452e9f764380"
           }
         },
         {
           "_type": "UMLClassDiagram",
-          "_id": "diagram_a632c908edb54a98988ffcd3",
+          "_id": "diagram_141411caf54447af8ab51f14",
           "_parent": {
-            "$ref": "model_28c9970153cd46219216ad78"
+            "$ref": "model_84a248b3f61144929b62d1b0"
           },
           "name": "Main",
           "ownedViews": [
             {
               "_type": "UMLClassView",
-              "_id": "view_6626eac1cef24172a1393c73",
+              "_id": "view_8348da576067477fb75d80a2",
               "_parent": {
-                "$ref": "diagram_a632c908edb54a98988ffcd3"
+                "$ref": "diagram_141411caf54447af8ab51f14"
               },
               "model": {
-                "$ref": "User_b93f3f10cf8d40a89d12eaf9"
+                "$ref": "User_e52da94775f445668dd68356"
               },
               "left": 60,
               "top": 60,
@@ -129,16 +119,16 @@
             },
             {
               "_type": "UMLClassView",
-              "_id": "view_ea5b9195803f4271878c4a1a",
+              "_id": "view_2389c9aff4284b3eb25372b5",
               "_parent": {
-                "$ref": "diagram_a632c908edb54a98988ffcd3"
+                "$ref": "diagram_141411caf54447af8ab51f14"
               },
               "model": {
-                "$ref": "Book_71da6b2416f144aea1430559"
+                "$ref": "Book_f80665dce23d452e9f764380"
               },
               "left": 517,
               "top": 65,
-              "width": 190,
+              "width": 199,
               "height": 90,
               "x": 517,
               "y": 65,
@@ -149,25 +139,26 @@
             },
             {
               "_type": "UMLDependencyView",
-              "_id": "view_dab2f70bb4684278a40045de",
+              "_id": "view_cfa9d7aae506433f9a19f38a",
               "_parent": {
-                "$ref": "diagram_a632c908edb54a98988ffcd3"
+                "$ref": "diagram_141411caf54447af8ab51f14"
               },
               "model": {
-                "$ref": "dep_b4136c57cbeb4c3b90f662b8"
+                "$ref": "dep_d16d9cd7939548508dccdf5b"
               },
               "tail": {
-                "$ref": "view_6626eac1cef24172a1393c73"
+                "$ref": "view_8348da576067477fb75d80a2"
               },
               "head": {
-                "$ref": "view_ea5b9195803f4271878c4a1a"
+                "$ref": "view_2389c9aff4284b3eb25372b5"
               },
               "lineStyle": 1,
-              "points": "201:110;612:110"
+              "points": "201:110;616:110"
             }
           ]
         }
       ]
     }
-  ]
+  ],
+  "documentVersion": 1
 }
