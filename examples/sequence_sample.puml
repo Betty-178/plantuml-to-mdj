@@ -1,0 +1,16 @@
+@startuml
+participant User
+participant System
+participant Database
+
+User -> System: login(username, password)
+activate System
+
+System -> Database: findUser(username)
+activate Database
+Database --> System: userInfo
+deactivate Database
+
+System --> User: loginResult
+deactivate System
+@enduml

@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-PlantUML class diagram -> StarUML .mdj converter.
+PlantUML class/state/sequence diagram -> StarUML .mdj converter.
 
 Features:
 1. Parse PlantUML class/interface/enum definitions.
 2. Convert attributes, operations, enum literals and relationships.
-3. Generate StarUML-compatible .mdj files.
+3. Convert basic PlantUML state and sequence diagrams.
+4. Generate StarUML-compatible .mdj files.
 4. Use Graphviz dot for automatic layout.
 5. Validate duplicate _id and risky empty names.
 
@@ -37,7 +38,18 @@ STATE_TRANS_RE = re.compile(
     r"^\s*(\[\*\]|[A-Za-z_][A-Za-z0-9_]*)\s*[-.]+>\s*(\[\*\]|[A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*(.+?))?\s*$"
 )
 STATE_DECL_RE = re.compile(r"^\s*state\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s*:\s*(.+?))?\s*$")
-PUML_BLOCK_RE = re.compile(r"@startuml(?:\s+([^\n\r]+))?(.*?)(?:@enduml|\Z)", re.IGNORECASE | re.DOTALL)
+PUML_BLOCK_RE = re.compile(r"@startuml(?:[ \t]+([^\n\r]+))?(.*?)(?:@enduml|\Z)", re.IGNORECASE | re.DOTALL)
+
+SEQUENCE_PARTICIPANT_RE = re.compile(
+    r'^\s*(actor|participant|boundary|control|entity|database|collections)\s+(?:"([^"]+)"|([A-Za-z_][A-Za-z0-9_]*))(?:\s+as\s+([A-Za-z_][A-Za-z0-9_]*))?\s*$',
+    re.IGNORECASE,
+)
+SEQUENCE_MESSAGE_RE = re.compile(
+    r'^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(<--|<-|-->|->|<\.\.|\.\.>)\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*(.*?))?\s*$',
+    re.IGNORECASE,
+)
+SEQUENCE_ACTIVATE_RE = re.compile(r'^\s*activate\s+([A-Za-z_][A-Za-z0-9_]*)\s*$', re.IGNORECASE)
+SEQUENCE_DEACTIVATE_RE = re.compile(r'^\s*deactivate\s+([A-Za-z_][A-Za-z0-9_]*)\s*$', re.IGNORECASE)
 
 
 def parse_member(line: str) -> Optional[Dict[str, Any]]:
@@ -66,7 +78,23 @@ def parse_member(line: str) -> Optional[Dict[str, Any]]:
         name, args_s, ret = m.group(1), m.group(2).strip(), (m.group(3) or "void").strip()
         params = []
         if args_s:
-            for part in [p.strip() for p in args_s.split(",") if p.strip()]:
+            # split on top-level commas only (ignore commas inside <...> generics)
+            parts = []
+            depth = 0
+            buf = ""
+            for ch in args_s:
+                if ch == "<":
+                    depth += 1
+                elif ch == ">":
+                    depth -= 1
+                if ch == "," and depth == 0:
+                    parts.append(buf)
+                    buf = ""
+                else:
+                    buf += ch
+            if buf.strip():
+                parts.append(buf)
+            for part in [p.strip() for p in parts if p.strip()]:
                 if ":" in part:
                     pn, pt = part.split(":", 1)
                     params.append({"name": pn.strip(), "type": pt.strip()})
@@ -741,7 +769,7 @@ def add_state_machine_to_project(project: Dict[str, Any], state_data: Dict[str, 
     if state_data.get("has_initial"):
         mid = gid("initial")
         vertex_ids["__INITIAL__"] = mid
-        region["vertices"].append({"_type": "UMLPseudostate", "_id": mid, "_parent": ref(region_id), "kind": "initial"})
+        region["vertices"].append({"_type": "UMLPseudostate", "_id": mid, "_parent": ref(region_id), "kind": "initial", "name": "InitState"})
     for st in state_data.get("states", []):
         mid = gid("state")
         vertex_ids[st["alias"]] = mid
@@ -827,15 +855,289 @@ def build_state_mdj(state_data: Dict[str, Any]) -> Dict[str, Any]:
     return project
 
 
+
+# ------------------------- sequence diagram parsing / generation -------------------------
+
+def is_sequence_block(name: str, body: str) -> bool:
+    lower_name = name.lower()
+    if "sequence" in lower_name or lower_name.startswith("seq") or lower_name.startswith("sd"):
+        return True
+    has_participant = False
+    has_message = False
+    for raw in body.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("'") or line.startswith("//") or line.startswith("@") or line.startswith("skinparam"):
+            continue
+        if SEQUENCE_PARTICIPANT_RE.match(line):
+            has_participant = True
+        if SEQUENCE_MESSAGE_RE.match(line):
+            has_message = True
+    # A PlantUML sequence diagram usually has participants and messages.  The
+    # participant check is important because a state transition also looks like
+    # A -> B and should stay in the state parser.
+    return has_message and has_participant
+
+
+def split_message_label(label: str) -> Tuple[str, str]:
+    label = (label or "").strip()
+    if not label:
+        return "message", ""
+    m = re.match(r"^([A-Za-z_][A-Za-z0-9_]*)\s*\((.*)\)\s*$", label)
+    if m:
+        return m.group(1), m.group(2).strip()
+    return label, ""
+
+
+def parse_sequence_puml(text: str) -> Dict[str, Any]:
+    participants: List[Dict[str, str]] = []
+    participant_index: Dict[str, Dict[str, str]] = {}
+    messages: List[Dict[str, str]] = []
+    activations: List[Dict[str, str]] = []
+
+    def add_participant(alias: str, name: Optional[str] = None, kind: str = "participant") -> None:
+        if alias in participant_index:
+            return
+        item = {"alias": alias, "name": name or alias, "kind": kind.lower()}
+        participant_index[alias] = item
+        participants.append(item)
+
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("@") or line.startswith("'") or line.startswith("//") or line.startswith("skinparam"):
+            continue
+        pm = SEQUENCE_PARTICIPANT_RE.match(line)
+        if pm:
+            kind = pm.group(1)
+            quoted = pm.group(2)
+            bare = pm.group(3)
+            alias = pm.group(4) or bare or quoted
+            label = quoted or bare or alias
+            add_participant(alias, label, kind)
+            continue
+        am = SEQUENCE_ACTIVATE_RE.match(line)
+        if am:
+            add_participant(am.group(1))
+            activations.append({"kind": "activate", "target": am.group(1)})
+            continue
+        dm = SEQUENCE_DEACTIVATE_RE.match(line)
+        if dm:
+            add_participant(dm.group(1))
+            activations.append({"kind": "deactivate", "target": dm.group(1)})
+            continue
+        mm = SEQUENCE_MESSAGE_RE.match(line)
+        if mm:
+            src, arrow, dst, label = mm.group(1), mm.group(2), mm.group(3), (mm.group(4) or "").strip()
+            add_participant(src)
+            add_participant(dst)
+            name, args = split_message_label(label)
+            messages.append({"source": src, "target": dst, "arrow": arrow, "label": label, "name": name, "arguments": args})
+            continue
+
+    return {"participants": participants, "messages": messages, "activations": activations}
+
+
+def sequence_label_text(index: int, msg: Dict[str, str]) -> str:
+    label = msg.get("label") or msg.get("name") or "message"
+    return f"{index} : {label}"
+
+
+def sequence_lifeline_view(name: str, model_id: str, diagram_id: str, gid: IdGen, x: int, top: int, height: int) -> Tuple[Dict[str, Any], str]:
+    vid = gid("view")
+    name_comp = gid("view")
+    stereo_label = gid("view")
+    name_label = gid("view")
+    namespace_label = gid("view")
+    property_label = gid("view")
+    line_part = gid("view")
+    width = max(72, min(180, 46 + 8 * len(name)))
+    name_h = 40
+    return {
+        "_type": "UMLSeqLifelineView",
+        "_id": vid,
+        "_parent": ref(diagram_id),
+        "model": ref(model_id),
+        "subViews": [
+            {
+                "_type": "UMLNameCompartmentView",
+                "_id": name_comp,
+                "_parent": ref(vid),
+                "model": ref(model_id),
+                "subViews": [
+                    {"_type": "LabelView", "_id": stereo_label, "_parent": ref(name_comp), "visible": False, "font": "Arial;13;0", "parentStyle": True, "height": 13},
+                    {"_type": "LabelView", "_id": name_label, "_parent": ref(name_comp), "font": "Arial;13;1", "parentStyle": True, "left": x + 8, "top": top + 7, "width": width - 10, "height": 13, "text": name},
+                    {"_type": "LabelView", "_id": namespace_label, "_parent": ref(name_comp), "visible": False, "font": "Arial;13;0", "parentStyle": True, "height": 13},
+                    {"_type": "LabelView", "_id": property_label, "_parent": ref(name_comp), "visible": False, "font": "Arial;13;0", "parentStyle": True, "height": 13, "horizontalAlignment": 1},
+                ],
+                "font": "Arial;13;0",
+                "parentStyle": True,
+                "left": x,
+                "top": top,
+                "width": width,
+                "height": name_h,
+                "stereotypeLabel": ref(stereo_label),
+                "nameLabel": ref(name_label),
+                "namespaceLabel": ref(namespace_label),
+                "propertyLabel": ref(property_label),
+            },
+            {
+                "_type": "UMLLinePartView",
+                "_id": line_part,
+                "_parent": ref(vid),
+                "model": ref(model_id),
+                "font": "Arial;13;0",
+                "parentStyle": False,
+                "left": x + width // 2,
+                "top": top + name_h + 1,
+                "width": 1,
+                "height": max(120, height - name_h),
+            },
+        ],
+        "font": "Arial;13;0",
+        "parentStyle": False,
+        "left": x,
+        "top": top,
+        "width": width,
+        "height": height,
+        "nameCompartment": ref(name_comp),
+        "linePart": ref(line_part),
+    }, line_part
+
+
+def make_sequence_message_view(
+    msg: Dict[str, str],
+    index: int,
+    msg_id: str,
+    diagram_id: str,
+    gid: IdGen,
+    src_x: int,
+    dst_x: int,
+    y: int,
+    tail_view_id: str,
+    head_view_id: str,
+) -> Dict[str, Any]:
+    view_id = gid("view")
+    name_label = gid("view")
+    stereo_label = gid("view")
+    prop_label = gid("view")
+    activation_id = gid("view")
+    label = sequence_label_text(index, msg)
+    midx = min(src_x, dst_x) + abs(dst_x - src_x) // 2
+    # Put the activation bar at the receiving lifeline, just like StarUML's
+    # exported sample.  This is a visual convenience; the UML model itself is
+    # still represented by UMLMessage.
+    act_left = dst_x - 7
+    return {
+        "_type": "UMLSeqMessageView",
+        "_id": view_id,
+        "_parent": ref(diagram_id),
+        "model": ref(msg_id),
+        "subViews": [
+            {"_type": "EdgeLabelView", "_id": name_label, "_parent": ref(view_id), "model": ref(msg_id), "font": "Arial;13;0", "parentStyle": False, "left": midx - max(30, 4 * len(label)), "top": y - 16, "width": max(40, 7 * len(label)), "height": 13, "alpha": 1.5707963267948966, "distance": 10, "hostEdge": ref(view_id), "edgePosition": 1, "text": label},
+            {"_type": "EdgeLabelView", "_id": stereo_label, "_parent": ref(view_id), "model": ref(msg_id), "visible": False, "font": "Arial;13;0", "parentStyle": False, "left": midx, "top": y - 31, "height": 13, "alpha": 1.5707963267948966, "distance": 25, "hostEdge": ref(view_id), "edgePosition": 1},
+            {"_type": "EdgeLabelView", "_id": prop_label, "_parent": ref(view_id), "model": ref(msg_id), "visible": False, "font": "Arial;13;0", "parentStyle": False, "left": midx, "top": y + 4, "height": 13, "alpha": -1.5707963267948966, "distance": 10, "hostEdge": ref(view_id), "edgePosition": 1},
+            {"_type": "UMLActivationView", "_id": activation_id, "_parent": ref(view_id), "model": ref(msg_id), "font": "Arial;13;0", "parentStyle": False, "left": act_left, "top": y - 4, "width": 14, "height": 28},
+        ],
+        "font": "Arial;13;0",
+        "parentStyle": False,
+        "head": ref(head_view_id),
+        "tail": ref(tail_view_id),
+        "points": f"{src_x}:{y};{dst_x}:{y}",
+        "nameLabel": ref(name_label),
+        "stereotypeLabel": ref(stereo_label),
+        "propertyLabel": ref(prop_label),
+        "activation": ref(activation_id),
+    }
+
+
+def build_sequence_mdj(seq_data: Dict[str, Any]) -> Dict[str, Any]:
+    gid = IdGen()
+    project_id = gid("project")
+    model_id = gid("model")
+    class_diagram_id = gid("diagram")
+    collab_id = gid("collab")
+    interaction_id = gid("interaction")
+    diagram_id = gid("diagram")
+
+    project = {"_type": "Project", "_id": project_id, "name": "PlantUML Converted Project", "ownedElements": [], "documentVersion": 1}
+    model = {"_type": "UMLModel", "_id": model_id, "_parent": ref(project_id), "name": "Model", "ownedElements": []}
+    project["ownedElements"].append(model)
+    # StarUML-created projects often keep an empty default class diagram. It is
+    # harmless and improves compatibility with some versions of StarUML.
+    model["ownedElements"].append({"_type": "UMLClassDiagram", "_id": class_diagram_id, "_parent": ref(model_id), "name": "Main", "defaultDiagram": True})
+
+    collaboration = {"_type": "UMLCollaboration", "_id": collab_id, "_parent": ref(model_id), "name": "Collaboration1", "ownedElements": [], "attributes": []}
+    interaction = {"_type": "UMLInteraction", "_id": interaction_id, "_parent": ref(collab_id), "name": "Interaction1", "ownedElements": [], "messages": [], "participants": []}
+    diagram = {"_type": "UMLSequenceDiagram", "_id": diagram_id, "_parent": ref(interaction_id), "name": "SequenceDiagram1", "ownedViews": []}
+
+    frame_view_id = gid("view")
+    frame_name = gid("view")
+    frame_type = gid("view")
+    participant_count = max(1, len(seq_data.get("participants", [])))
+    frame_width = max(700, 180 + 180 * participant_count)
+    frame_height = max(420, 160 + 48 * max(1, len(seq_data.get("messages", []))))
+    diagram["ownedViews"].append({
+        "_type": "UMLFrameView", "_id": frame_view_id, "_parent": ref(diagram_id), "model": ref(diagram_id),
+        "subViews": [
+            {"_type": "LabelView", "_id": frame_name, "_parent": ref(frame_view_id), "font": "Arial;13;0", "parentStyle": True, "left": 33, "top": 13, "width": 80, "height": 13, "text": "Interaction1"},
+            {"_type": "LabelView", "_id": frame_type, "_parent": ref(frame_view_id), "font": "Arial;13;1", "parentStyle": True, "left": 13, "top": 13, "width": 14, "height": 13, "text": "sd"},
+        ],
+        "font": "Arial;13;0", "parentStyle": False, "left": 8, "top": 8, "width": frame_width, "height": frame_height,
+        "nameLabel": ref(frame_name), "frameTypeLabel": ref(frame_type),
+    })
+
+    lifeline_ids: Dict[str, str] = {}
+    line_view_ids: Dict[str, str] = {}
+    line_x: Dict[str, int] = {}
+    top = 48
+    gap = 170
+    first_x = 110
+    lifeline_height = max(260, frame_height - 90)
+    for i, part in enumerate(seq_data.get("participants", []), start=1):
+        alias = part["alias"]
+        attr_id = gid("attr")
+        life_id = gid("lifeline")
+        collaboration["attributes"].append({"_type": "UMLAttribute", "_id": attr_id, "_parent": ref(collab_id), "name": f"Role{i}"})
+        interaction["participants"].append({"_type": "UMLLifeline", "_id": life_id, "_parent": ref(interaction_id), "name": part.get("name", alias), "represent": ref(attr_id), "isMultiInstance": False})
+        lifeline_ids[alias] = life_id
+        x = first_x + (i - 1) * gap
+        view, line_id = sequence_lifeline_view(part.get("name", alias), life_id, diagram_id, gid, x, top, lifeline_height)
+        line_view_ids[alias] = line_id
+        line_x[alias] = x + int(view["width"]) // 2
+        diagram["ownedViews"].append(view)
+
+    for i, msg in enumerate(seq_data.get("messages", []), start=1):
+        src = msg["source"]
+        dst = msg["target"]
+        if src not in lifeline_ids or dst not in lifeline_ids:
+            continue
+        msg_id = gid("message")
+        m = {"_type": "UMLMessage", "_id": msg_id, "_parent": ref(interaction_id), "name": msg.get("name") or "message", "source": ref(lifeline_ids[src]), "target": ref(lifeline_ids[dst])}
+        if msg.get("arguments"):
+            m["arguments"] = msg["arguments"]
+        interaction["messages"].append(m)
+        y = 104 + (i - 1) * 42
+        diagram["ownedViews"].append(make_sequence_message_view(
+            msg, i, msg_id, diagram_id, gid,
+            line_x[src], line_x[dst], y,
+            line_view_ids[src], line_view_ids[dst],
+        ))
+
+    interaction["ownedElements"].append(diagram)
+    collaboration["ownedElements"].append(interaction)
+    model["ownedElements"].append(collaboration)
+    return project
+
+
 def build_project_from_puml(text: str, keyword_strict: bool = False) -> Dict[str, Any]:
     blocks = split_puml_blocks(text)
     class_texts = []
     state_texts: List[Tuple[str, str]] = []
+    sequence_texts: List[Tuple[str, str]] = []
     for name, body in blocks:
-        if is_state_block(name, body) and not is_class_block(name, body):
-            state_texts.append((name, body))
-        elif is_class_block(name, body):
+        if is_class_block(name, body):
             class_texts.append(body)
+        elif is_sequence_block(name, body):
+            sequence_texts.append((name, body))
         elif is_state_block(name, body):
             state_texts.append((name, body))
 
@@ -845,6 +1147,11 @@ def build_project_from_puml(text: str, keyword_strict: bool = False) -> Dict[str
             apply_keyword_strict_patch(units)
         project = build_mdj(units, rels)
         project.setdefault("documentVersion", 1)
+    elif sequence_texts:
+        project = build_sequence_mdj(parse_sequence_puml(sequence_texts[0][1]))
+        # First version supports one sequence diagram per file. Additional
+        # sequence blocks are ignored rather than mixed into the same project,
+        # because StarUML sequence diagrams are rooted in their own interaction.
     elif state_texts:
         project = build_state_mdj(parse_state_puml(state_texts[0][1]))
         state_texts = state_texts[1:]
@@ -920,4 +1227,5 @@ def main(argv: List[str]) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+    raise SystemExit(main(sys.argv)
+)
