@@ -169,7 +169,25 @@ Idle --> [*]
 
 The first class diagram becomes the main class diagram, and state diagrams are added to the same `.mdj` project.
 
-For the current version, sequence diagrams should be converted in a separate `.puml` file. Mixing sequence diagrams with class/state diagrams is not recommended yet.
+### Combining class, state and sequence diagrams
+
+The main script `plantuml_to_mdj.py` keeps the class/state diagram and the sequence diagram in separate `.puml` files. To put all three diagram types into a single `.mdj` project, use the `combine.py` helper:
+
+```bash
+python combine.py <class_state.puml> <output.mdj> [sequence.puml]
+```
+
+- `<class_state.puml>` — a PlantUML file with the class diagram (and optionally state diagrams).
+- `<output.mdj>` — the combined StarUML project to write.
+- `[sequence.puml]` — optional sequence diagram file. When provided, it is added to the project root as `Collaboration1 / Interaction1 / SequenceDiagram1`.
+
+For example:
+
+```bash
+python combine.py examples/class_sample.puml combined.mdj examples/sequence_sample.puml
+```
+
+The resulting `combined.mdj` opens in StarUML with the class diagram, the state machine, and the sequence diagram all in one project. The sequence diagram still comes from its own `.puml` file, because StarUML sequence diagrams are rooted in their own interaction.
 
 ## Supported PlantUML subset
 
@@ -218,7 +236,7 @@ For general use, you do not need this option.
 
 - The converter supports a practical subset of PlantUML, not the complete PlantUML language.
 - Sequence diagram support is currently basic.
-- Sequence diagrams should be converted as standalone files in the current version.
+- A sequence diagram must live in its own `.puml` file; use `combine.py` to merge it with a class/state project into one `.mdj`.
 - Sequence `activate` / `deactivate` commands are parsed, but nested activation semantics are not fully modeled yet.
 - Sequence combined fragments such as `alt`, `else`, `loop`, `opt`, `par` are not supported yet.
 - Complex class diagram syntax, packages, notes, stereotypes and advanced layout instructions may not be parsed.
